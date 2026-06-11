@@ -126,4 +126,5 @@ PARTICIPANTES = [
     "Big",
     "Nathampa",
     "Enzo",
+    "Maua",
 ]
