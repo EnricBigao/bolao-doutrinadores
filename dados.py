@@ -1,108 +1,91 @@
 """
-Gerenciamento de dados do bolão — salva/carrega palpites e resultados em JSON.
+Gerenciamento de dados do bolão — Supabase como banco de dados.
 """
-import json
 import os
-from pathlib import Path
+import requests
 
-DATA_DIR = Path(__file__).parent / "data"
-PALPITES_FILE = DATA_DIR / "palpites.json"
-RESULTADOS_FILE = DATA_DIR / "resultados.json"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://jwyrvijbfiaegoengdyt.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "sb_publishable_FaHwpxfEu56AgD1w_dk12g_3lqFtpqO")
 
-DATA_DIR.mkdir(exist_ok=True)
-
-
-# ── helpers genéricos ────────────────────────────────────────────────────────
-
-def _load(path: Path) -> dict:
-    if path.exists():
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation",
+}
 
 
-def _save(path: Path, data: dict):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def _get(table: str, params: dict = None):
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, params=params)
+    r.raise_for_status()
+    return r.json()
 
 
-# ── palpites ─────────────────────────────────────────────────────────────────
-
-def carregar_palpites() -> dict:
-    """
-    Estrutura:
-    {
-      "Thiaguinho Vrau": {
-        "trancado": false,
-        "palpites": {
-          "1": {"gols1": 2, "gols2": 1},
-          ...
-        }
-      },
-      ...
-    }
-    """
-    return _load(PALPITES_FILE)
+def _upsert(table: str, data: dict):
+    h = {**HEADERS, "Prefer": "resolution=merge-duplicates,return=representation"}
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=h, json=data)
+    r.raise_for_status()
+    return r.json()
 
 
-def salvar_palpites(dados: dict):
-    _save(PALPITES_FILE, dados)
+def _delete(table: str, params: dict):
+    r = requests.delete(f"{SUPABASE_URL}/rest/v1/{table}", headers=HEADERS, params=params)
+    r.raise_for_status()
 
+
+# ── palpites ──────────────────────────────────────────────────────────────────
 
 def palpites_participante(nome: str) -> dict:
-    dados = carregar_palpites()
-    return dados.get(nome, {"trancado": False, "palpites": {}})
+    rows = _get("palpites", {"participante": f"eq.{nome}"})
+    trancado_rows = _get("trancados", {"participante": f"eq.{nome}"})
+    trancado = trancado_rows[0]["trancado"] if trancado_rows else False
+    palpites = {str(r["jogo_id"]): {"gols1": r["gols1"], "gols2": r["gols2"]} for r in rows}
+    return {"trancado": trancado, "palpites": palpites}
 
 
 def salvar_palpite(nome: str, jogo_id: int, gols1: int, gols2: int):
-    dados = carregar_palpites()
-    if nome not in dados:
-        dados[nome] = {"trancado": False, "palpites": {}}
-    if dados[nome].get("trancado"):
-        return False  # não pode editar
-    dados[nome]["palpites"][str(jogo_id)] = {"gols1": gols1, "gols2": gols2}
-    _save(PALPITES_FILE, dados)
+    # checa se está trancado
+    trancado_rows = _get("trancados", {"participante": f"eq.{nome}"})
+    if trancado_rows and trancado_rows[0]["trancado"]:
+        return False
+    _upsert("palpites", {"participante": nome, "jogo_id": jogo_id, "gols1": gols1, "gols2": gols2})
     return True
 
 
 def trancar(nome: str):
-    dados = carregar_palpites()
-    if nome not in dados:
-        dados[nome] = {"trancado": False, "palpites": {}}
-    dados[nome]["trancado"] = True
-    _save(PALPITES_FILE, dados)
+    _upsert("trancados", {"participante": nome, "trancado": True})
 
 
 def destrancar(nome: str):
-    """Usado pelo admin para corrigir em caso de necessidade."""
-    dados = carregar_palpites()
-    if nome in dados:
-        dados[nome]["trancado"] = False
-    _save(PALPITES_FILE, dados)
+    _upsert("trancados", {"participante": nome, "trancado": False})
+
+
+def carregar_palpites() -> dict:
+    """Retorna todos os palpites agrupados por participante (usado no admin)."""
+    rows = _get("palpites")
+    trancados = {r["participante"]: r["trancado"] for r in _get("trancados")}
+    result = {}
+    for r in rows:
+        nome = r["participante"]
+        if nome not in result:
+            result[nome] = {"trancado": trancados.get(nome, False), "palpites": {}}
+        result[nome]["palpites"][str(r["jogo_id"])] = {"gols1": r["gols1"], "gols2": r["gols2"]}
+    return result
 
 
 # ── resultados reais ──────────────────────────────────────────────────────────
 
 def carregar_resultados() -> dict:
-    """
-    {
-      "1": {"gols1": 2, "gols2": 0},
-      ...
-    }
-    """
-    return _load(RESULTADOS_FILE)
+    rows = _get("resultados")
+    return {str(r["jogo_id"]): {"gols1": r["gols1"], "gols2": r["gols2"]} for r in rows}
 
 
 def salvar_resultado(jogo_id: int, gols1: int, gols2: int):
-    dados = carregar_resultados()
-    dados[str(jogo_id)] = {"gols1": gols1, "gols2": gols2}
-    _save(RESULTADOS_FILE, dados)
+    _upsert("resultados", {"jogo_id": jogo_id, "gols1": gols1, "gols2": gols2})
 
 
 def remover_resultado(jogo_id: int):
-    dados = carregar_resultados()
-    dados.pop(str(jogo_id), None)
-    _save(RESULTADOS_FILE, dados)
+    _delete("resultados", {"jogo_id": f"eq.{jogo_id}"})
 
 
 # ── pontuação ─────────────────────────────────────────────────────────────────
@@ -116,9 +99,6 @@ def _vencedor(g1: int, g2: int) -> str:
 
 
 def calcular_pontos(nome: str) -> dict:
-    """
-    Retorna {"total": N, "detalhes": {jogo_id: {"acerto_resultado": bool, "acerto_placar": bool}}}
-    """
     resultados = carregar_resultados()
     palpite_info = palpites_participante(nome)
     palpites = palpite_info.get("palpites", {})
@@ -137,7 +117,7 @@ def calcular_pontos(nome: str) -> dict:
 
         pts = 0
         if acerto_placar:
-            pts = 3  # placar certo já inclui resultado certo
+            pts = 3
         elif acerto_res:
             pts = 1
 
@@ -148,7 +128,6 @@ def calcular_pontos(nome: str) -> dict:
 
 
 def tabela_geral(participantes: list) -> list:
-    """Retorna lista ordenada por pontos."""
     rows = []
     for nome in participantes:
         pts = calcular_pontos(nome)
@@ -159,7 +138,6 @@ def tabela_geral(participantes: list) -> list:
             "🔒 Trancado": "✅" if info.get("trancado") else "❌",
         })
     rows.sort(key=lambda x: x["Pontos"], reverse=True)
-    # adiciona posição
     for i, r in enumerate(rows):
         emoji = ["🥇", "🥈", "🥉"][i] if i < 3 else f"{i+1}º"
         r["Pos"] = emoji
