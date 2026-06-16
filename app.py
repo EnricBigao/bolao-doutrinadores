@@ -19,6 +19,9 @@ from dados import (
     remover_resultado,
     calcular_pontos,
     tabela_geral,
+    carregar_palpites,
+    carregar_bonus,
+    salvar_bonus,
 )
 
 # ── configuração da página ────────────────────────────────────────────────────
@@ -375,7 +378,6 @@ with abas[-1]:
     st.subheader("🎯 Pontuação bônus (manual)")
     st.caption("Use para ajustar pontos de jogos anteriores que não foram registrados automaticamente.")
 
-    from dados import carregar_bonus, salvar_bonus
     bonus_atual = carregar_bonus()
 
     for p in PARTICIPANTES:
@@ -404,7 +406,6 @@ with abas[-1]:
 
     st.divider()
     st.subheader("📊 Status atual dos palpites")
-    from dados import carregar_palpites
     pals = carregar_palpites()
     status_rows = []
     for p in PARTICIPANTES:
