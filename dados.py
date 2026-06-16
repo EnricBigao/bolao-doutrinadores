@@ -128,13 +128,17 @@ def calcular_pontos(nome: str) -> dict:
 
 
 def tabela_geral(participantes: list) -> list:
+    bonus_map = carregar_bonus()
     rows = []
     for nome in participantes:
         pts = calcular_pontos(nome)
         info = palpites_participante(nome)
+        bonus = bonus_map.get(nome, 0)
         rows.append({
             "Participante": nome,
-            "Pontos": pts["total"],
+            "Pts Auto": pts["total"],
+            "Bônus": bonus,
+            "Pontos": pts["total"] + bonus,
             "🔒 Trancado": "✅" if info.get("trancado") else "❌",
         })
     rows.sort(key=lambda x: x["Pontos"], reverse=True)
@@ -142,3 +146,14 @@ def tabela_geral(participantes: list) -> list:
         emoji = ["🥇", "🥈", "🥉"][i] if i < 3 else f"{i+1}º"
         r["Pos"] = emoji
     return rows
+
+
+# ── pontos bônus ─────────────────────────────────────────────────────────────
+
+def carregar_bonus() -> dict:
+    rows = _get("pontos_bonus")
+    return {r["participante"]: r["bonus"] for r in rows}
+
+
+def salvar_bonus(nome: str, bonus: int):
+    _upsert("pontos_bonus", {"participante": nome, "bonus": bonus})
