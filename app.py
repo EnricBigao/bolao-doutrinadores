@@ -372,6 +372,30 @@ with abas[-1]:
             st.rerun()
 
     st.divider()
+    st.subheader("🎯 Pontuação bônus (manual)")
+    st.caption("Use para ajustar pontos de jogos anteriores que não foram registrados automaticamente.")
+
+    from dados import carregar_bonus, salvar_bonus
+    bonus_atual = carregar_bonus()
+
+    for p in PARTICIPANTES:
+        col_nome, col_pts, col_btn = st.columns([3, 2, 1])
+        with col_nome:
+            st.markdown(f"**{p}**")
+        with col_pts:
+            novo_bonus = st.number_input(
+                "Bônus", min_value=0, max_value=999,
+                value=int(bonus_atual.get(p, 0)),
+                key=f"bonus_{p}",
+                label_visibility="collapsed",
+            )
+        with col_btn:
+            if st.button("💾", key=f"btn_bonus_{p}"):
+                salvar_bonus(p, novo_bonus)
+                st.success(f"Salvo!")
+                st.rerun()
+
+    st.divider()
     st.subheader("🔓 Destrancar participante")
     part_dest = st.selectbox("Participante", PARTICIPANTES, key="admin_dest")
     if st.button("🔓 Destrancar", key="btn_dest"):
